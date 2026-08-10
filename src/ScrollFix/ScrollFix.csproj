@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>ScrollFix</AssemblyName>
+    <RootNamespace>ScrollFix</RootNamespace>
+    <Version>1.0.0</Version>
+    <Authors>DEDSEC</Authors>
+    <Description>Filters reverse ghost scrolls from worn mouse wheel encoders</Description>
+    <Product>Scroll Fix</Product>
+  </PropertyGroup>
+
+</Project>
