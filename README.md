@@ -1,143 +1,93 @@
 # Scroll Fix
 
-Software fix for mouse scroll wheels that occasionally jump in the **wrong direction** (classic worn/dirty rotary encoder glitch). Built for Windows — useful with Cooler Master and many other gaming mice.
+[![Release](https://img.shields.io/github/v/release/Leozz18/scroll-fix)](https://github.com/Leozz18/scroll-fix/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)](https://github.com/Leozz18/scroll-fix/releases)
 
-When you scroll down and the page sometimes ticks upward (or the reverse), Scroll Fix intercepts those ghost events and drops them before apps see them.
+**Fix mouse scroll wheel jumping the wrong way on Windows.**
 
-## Problem → solution roadmap
+If your wheel scrolls down and sometimes ticks **up** (or the reverse), that is usually a worn/dirty rotary encoder — not your browser. Scroll Fix is a tiny tray app that blocks those ghost pulses.
 
-```mermaid
-flowchart TB
-  subgraph problem [Problem]
-    userScroll[User scrolls down]
-    encoder[Worn or dirty wheel encoder]
-    ghost[Ghost opposite pulses]
-    jump[Page jumps the wrong way]
-    userScroll --> encoder
-    encoder --> ghost
-    ghost --> jump
-  end
+![Scroll Fix before/after demo](docs/demo.gif)
 
-  subgraph solution [Scroll Fix]
-    hook[WH_MOUSE_LL system hook]
-    filter[ScrollFilter aggressive mode]
-    allow[Same direction: allow]
-    block[Opposite within window: block]
-    pause[Pause then reverse: allow]
-    hook --> filter
-    filter --> allow
-    filter --> block
-    filter --> pause
-  end
+## Download (no build needed)
 
-  jump --> hook
-```
+1. Grab **`ScrollFix.exe`** from the [latest release](https://github.com/Leozz18/scroll-fix/releases/latest)
+2. Run it
+3. Look for the green tray icon near the clock
 
-### Site map of the app
+Right-click tray → **Enabled** / **Settings…** / **Quit**
+
+Works with Cooler Master, Logitech, Razer, and most other mice with mechanical scroll encoders.
+
+## Why this happens
 
 ```mermaid
 flowchart LR
-  tray[Tray icon]
-  tray --> enabled[Enabled toggle]
-  tray --> settings[Settings window]
-  tray --> quit[Quit]
-  settings --> aggressive[Aggressive mode]
-  settings --> windowMs[Reverse block ms]
-  settings --> autostart[Start with Windows]
-  settings --> counter[Blocked counter]
-  tray --> hookRuntime[MouseWheelHook]
-  hookRuntime --> filterRuntime[ScrollFilter]
-  filterRuntime --> apps[Browsers editors games]
+  wheel[Scroll wheel] --> encoder[Worn encoder]
+  encoder --> ghost[Ghost opposite pulse]
+  ghost --> jump[Page jumps wrong way]
 ```
 
-### Decision flow inside the filter
+Cleaning with compressed air can help for a while. When the encoder is worn, software filtering is the practical fix.
+
+## How Scroll Fix works
 
 ```mermaid
 flowchart TD
-  event[Wheel event]
-  event --> enabled{Filter enabled?}
-  enabled -->|no| pass[Allow]
-  enabled -->|yes| same{Same direction as last?}
-  same -->|yes| passSame[Allow and lock direction]
-  same -->|no| window{Inside reverse block window?}
-  window -->|yes aggressive| drop[Block ghost and extend lock]
-  window -->|no| reverse[Allow real direction change]
+  event[Wheel event] --> hook[WH_MOUSE_LL hook]
+  hook --> filter{Aggressive filter}
+  filter -->|same direction| allow[Allow]
+  filter -->|opposite inside window| block[Block ghost]
+  filter -->|pause then reverse| reverse[Allow real reverse]
 ```
+
+Default **Aggressive mode** blocks any opposite notch within ~220 ms and extends the lock during ghost bursts. Pause briefly (~0.2s) when you intentionally reverse direction.
+
+More diagrams: [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Features
 
-- Global low-level mouse wheel hook (works in browsers, editors, games in windowed mode, etc.)
-- Aggressive mode by default for worn encoders
-- Tunable reverse-block window
-- System tray icon (enable/disable, settings, quit)
-- Optional start with Windows
+- Global low-level mouse hook (browsers, editors, windowed games, …)
+- Aggressive mode tuned for worn encoders
+- Adjustable reverse-block window
+- Tray icon + settings + optional start with Windows
 - Counter of blocked ghost scrolls
-- Single `.exe` (no Cooler Master software required)
-
-## Hardware tip (try this first)
-
-The root cause is usually dust or wear on the wheel encoder:
-
-1. Hold the mouse upside down.
-2. Blow compressed air into the gaps beside the scroll wheel while spinning it.
-3. Optional: electronics **contact cleaner** (not regular WD-40) on the encoder, spin for ~30–60s, let dry fully.
-
-If cleaning helps only for a few minutes, the encoder is worn — keep using Scroll Fix, RMA if under warranty, or replace the encoder later.
-
-## Requirements
-
-- Windows 10/11
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) to build (runtime needed if not self-contained)
-
-## Build & run
-
-```bat
-dotnet build ScrollFix.sln -c Release
-dotnet run --project src\ScrollFix -c Release
-```
-
-Or publish a portable exe:
-
-```bat
-dotnet publish src\ScrollFix -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
-publish\ScrollFix.exe
-```
-
-A green tray icon appears near the clock. Right-click:
-
-- **Enabled** — toggle the filter
-- **Settings…** — tweak thresholds and autostart
-- **Quit**
-
-## Tests
-
-```bat
-dotnet test ScrollFix.sln
-```
+- Single portable `.exe` (self-contained .NET)
 
 ## Settings
 
 | Setting | Default | Meaning |
 |--------|---------|---------|
 | Aggressive mode | on | Opposite scrolls inside the window are always blocked |
-| Reverse block window (ms) | 220 | How long opposite scrolls are treated as ghosts |
-| Max ghost notches | 2 | Used only in mild mode |
-| Confirm direction count | 3 | Used only in mild mode |
+| Reverse block window (ms) | 220 | How long opposite scrolls count as ghosts |
 
-To reverse on purpose in aggressive mode, pause briefly (~0.2s) then scroll the other way. If ghosts still leak, raise the window to 300 ms. If reversals feel sticky, lower it to 160–180 ms.
+If ghosts still leak → raise to **300 ms**. If intentional reverses feel sticky → lower to **160–180 ms**.
 
-Settings file:
+Settings file: `%LOCALAPPDATA%\ScrollFix\settings.json`
 
-`%LOCALAPPDATA%\ScrollFix\settings.json`
+## Build from source
+
+Requires [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+
+```bat
+dotnet test ScrollFix.sln
+dotnet publish src\ScrollFix -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish
+```
+
+## Hardware tip
+
+1. Blow compressed air into the gaps beside the wheel while spinning it
+2. Optional: electronics contact cleaner (not regular WD-40), spin 30–60s, let dry
+3. If it only helps for minutes, keep using Scroll Fix (or RMA / replace the encoder)
 
 ## Project layout
 
 ```text
 scroll-fix/
-├── ScrollFix.sln
-├── src/ScrollFix/          # tray app + hook + filter
-├── src/ScrollFix.Tests/    # unit tests
-├── publish/                # optional local build output (gitignored)
+├── src/ScrollFix/           # tray app + hook + filter
+├── src/ScrollFix.Tests/
+├── docs/ROADMAP.md
 └── README.md
 ```
 
