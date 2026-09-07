@@ -68,7 +68,17 @@ public sealed class ScrollFilter
                 return new FilterDecision(Allow: true);
             }
 
-            // Aggressive mode (default): any opposite notch inside the window is a ghost.
+            // A real direction switch usually has a short pause before the first opposite notch.
+            // Ghost bursts are clustered tightly together, so we only treat the change as a real
+            // reversal after the wheel has settled for a meaningful fraction of the block window.
+            var settleMs = Math.Max(60, _settings.ReverseBlockMs / 3);
+            if (elapsed >= settleMs && elapsed <= _settings.ReverseBlockMs)
+            {
+                Accept(direction, now);
+                return new FilterDecision(Allow: true);
+            }
+
+            // Aggressive mode (default): tightly clustered opposite notches are ghost bursts.
             // This prevents double-ghost bursts from "confirming" a fake reversal.
             if (_settings.AggressiveMode)
             {

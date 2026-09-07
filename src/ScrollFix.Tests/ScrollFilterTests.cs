@@ -38,6 +38,22 @@ public class ScrollFilterTests
     }
 
     [Fact]
+    public void Aggressive_ReversalAfterBriefPause_IsAllowed()
+    {
+        var filter = new ScrollFilter(new AppSettings
+        {
+            Enabled = true,
+            AggressiveMode = true,
+            ReverseBlockMs = 220,
+        });
+
+        Assert.True(filter.Decide(-ScrollFilter.WheelDelta).Allow);
+        Thread.Sleep(120);
+        var reversal = filter.Decide(+ScrollFilter.WheelDelta);
+        Assert.True(reversal.Allow);
+    }
+
+    [Fact]
     public void Aggressive_DoubleGhostBurst_StaysBlocked()
     {
         var filter = new ScrollFilter(new AppSettings
