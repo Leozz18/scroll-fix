@@ -37,6 +37,9 @@ public sealed class AppSettings
 
     public int BlockedCount { get; set; }
 
+    /// <summary>Diagnostics: log every wheel event to wheel-trace.log.</summary>
+    public bool TraceEnabled { get; set; }
+
     /// <summary>Legacy v1.0 flag, read only to detect old settings files; never written back.</summary>
     [JsonPropertyName("AggressiveMode")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

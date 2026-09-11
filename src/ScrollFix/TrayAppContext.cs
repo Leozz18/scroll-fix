@@ -21,6 +21,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _pauseItem;
     private readonly ToolStripMenuItem _blockedItem;
+    private readonly ToolStripMenuItem _traceItem;
+    private readonly WheelTrace _trace;
     private readonly System.Windows.Forms.Timer _uiTimer;
 
     private SettingsForm? _settingsForm;
@@ -36,7 +38,8 @@ internal sealed class TrayAppContext : ApplicationContext
         Autostart.SetEnabled(_settings.StartWithWindows);
 
         _filter = new ScrollFilter(_settings);
-        _hook = new MouseWheelHook(_filter.Decide);
+        _trace = new WheelTrace(WheelTrace.DefaultPath);
+        _hook = new MouseWheelHook(Decide);
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, OnToggleEnabled)
         {
@@ -44,6 +47,14 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _pauseItem = new ToolStripMenuItem("Pause for 10 minutes", null, OnTogglePause);
         _blockedItem = new ToolStripMenuItem(BlockedText()) { Enabled = false };
+        _traceItem = new ToolStripMenuItem("Log wheel events (diagnostics)", null, OnToggleTrace)
+        {
+            Checked = _settings.TraceEnabled,
+        };
+
+        var diagnostics = new ToolStripMenuItem("Diagnostics");
+        diagnostics.DropDownItems.Add(_traceItem);
+        diagnostics.DropDownItems.Add(new ToolStripMenuItem("Open settings folder", null, (_, _) => OpenUrl(AppSettings.SettingsDirectory)));
 
         var menu = new ContextMenuStrip();
         menu.Items.Add(_enabledItem);
@@ -51,6 +62,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripMenuItem("Settings…", null, OnOpenSettings));
         menu.Items.Add(_blockedItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(diagnostics);
         menu.Items.Add(new ToolStripMenuItem("GitHub / report a bug", null, (_, _) => OpenUrl(RepoUrl)));
         menu.Items.Add(new ToolStripMenuItem($"Scroll Fix v{AppVersion}") { Enabled = false });
         menu.Items.Add(new ToolStripSeparator());
@@ -90,6 +102,25 @@ internal sealed class TrayAppContext : ApplicationContext
     private static string AppVersion =>
         typeof(TrayAppContext).Assembly.GetName().Version?.ToString(3) ?? "dev";
 
+    /// <summary>Hook thread. Filter first, then (optionally) record. No IO here.</summary>
+    private FilterDecision Decide(int delta)
+    {
+        var decision = _filter.Decide(delta);
+        if (_settings.TraceEnabled)
+        {
+            _trace.Record(Environment.TickCount64, delta, decision, _settings.BlockedCount);
+        }
+
+        return decision;
+    }
+
+    private void OnToggleTrace(object? sender, EventArgs e)
+    {
+        _settings.TraceEnabled = !_settings.TraceEnabled;
+        _traceItem.Checked = _settings.TraceEnabled;
+        TrySave();
+    }
+
     private void OnUiTick(object? sender, EventArgs e)
     {
         // Auto-resume after a pause.
@@ -97,6 +128,8 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             EndPause();
         }
+
+        _trace.Flush();
 
         var blocked = _settings.BlockedCount;
         if (blocked != _lastShownBlocked)
@@ -235,6 +268,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _uiTimer.Stop();
         _uiTimer.Dispose();
         _hook.Dispose();
+        _trace.Flush();
         _tray.Visible = false;
         _tray.Icon?.Dispose();
         _tray.Dispose();
