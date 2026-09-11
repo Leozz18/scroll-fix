@@ -77,7 +77,7 @@ public sealed class WheelTrace
                 File.WriteAllText(_path, "# rotated\n");
             }
 
-            using var w = new StreamWriter(_path, append: true, Encoding.UTF8);
+            using var w = new StreamWriter(_path, append: true, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             if (!info.Exists || info.Length == 0)
             {
                 w.WriteLine("# t_ms\tdt_ms\tdelta\tdecision\tblocked_total\t[replay]");
