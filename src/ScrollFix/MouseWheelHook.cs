@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 
 namespace ScrollFix;
@@ -5,11 +7,21 @@ namespace ScrollFix;
 /// <summary>
 /// Global WH_MOUSE_LL hook that can swallow vertical wheel events and
 /// re-inject previously held notches once a reversal is confirmed.
+///
+/// Threading model (important, see v1.1.0 post-mortem in CHANGELOG):
+///  - The hook lives on its own high-priority thread with a private message
+///    loop, so UI work (menus, dialogs, file writes) can never delay it.
+///  - The callback only runs the filter and enqueues replays. It never calls
+///    SendInput: doing so from inside a low-level hook deadlocks win32k,
+///    because the raw input thread is blocked waiting for the callback while
+///    SendInput waits for the raw input thread.
+///  - Replays are sent from a dedicated worker thread, in order.
 /// </summary>
 public sealed class MouseWheelHook : IDisposable
 {
     private const int WhMouseLl = 14;
     private const int WmMouseWheel = 0x020A;
+    private const int WmQuit = 0x0012;
     private const int HcAction = 0;
     private const uint LlmhfInjected = 0x01;
     private const uint InputMouse = 0;
@@ -20,6 +32,11 @@ public sealed class MouseWheelHook : IDisposable
 
     private readonly Func<int, FilterDecision> _decide;
     private readonly LowLevelMouseProc _proc;
+    private readonly BlockingCollection<int> _replayQueue = new();
+
+    private Thread? _hookThread;
+    private Thread? _replayThread;
+    private uint _hookThreadId;
     private IntPtr _hook = IntPtr.Zero;
     private bool _disposed;
 
@@ -34,33 +51,55 @@ public sealed class MouseWheelHook : IDisposable
 
     public void Start()
     {
-        if (_hook != IntPtr.Zero)
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_hookThread is not null)
         {
             return;
         }
 
-        // For WH_MOUSE_LL, the hook runs in the installing process; null module handle is fine.
-        _hook = SetWindowsHookEx(
-            WhMouseLl,
-            _proc,
-            GetModuleHandle(null),
-            0);
-
-        if (_hook == IntPtr.Zero)
+        _replayThread = new Thread(ReplayLoop)
         {
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            IsBackground = true,
+            Name = "ScrollFix.Replay",
+        };
+        _replayThread.Start();
+
+        var startError = new StartResult();
+        using var ready = new ManualResetEventSlim(false);
+
+        _hookThread = new Thread(() => HookThreadMain(ready, startError))
+        {
+            IsBackground = true,
+            Name = "ScrollFix.Hook",
+            Priority = ThreadPriority.Highest,
+        };
+        _hookThread.SetApartmentState(ApartmentState.STA);
+        _hookThread.Start();
+
+        ready.Wait();
+        if (startError.Error is not null)
+        {
+            _hookThread = null;
+            throw startError.Error;
         }
+    }
+
+    private sealed class StartResult
+    {
+        public Exception? Error;
     }
 
     public void Stop()
     {
-        if (_hook == IntPtr.Zero)
+        var thread = _hookThread;
+        if (thread is null)
         {
             return;
         }
 
-        UnhookWindowsHookEx(_hook);
-        _hook = IntPtr.Zero;
+        PostThreadMessage(_hookThreadId, WmQuit, IntPtr.Zero, IntPtr.Zero);
+        thread.Join(TimeSpan.FromSeconds(2));
+        _hookThread = null;
     }
 
     public void Dispose()
@@ -70,9 +109,46 @@ public sealed class MouseWheelHook : IDisposable
             return;
         }
 
-        Stop();
         _disposed = true;
+        Stop();
+        _replayQueue.CompleteAdding();
+        _replayThread?.Join(TimeSpan.FromSeconds(1));
+        _replayQueue.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    // ------------------------------------------------------------ hook thread
+
+    private void HookThreadMain(ManualResetEventSlim ready, StartResult result)
+    {
+        try
+        {
+            _hookThreadId = GetCurrentThreadId();
+            // For WH_MOUSE_LL, the hook runs in the installing process; null module handle is fine.
+            _hook = SetWindowsHookEx(WhMouseLl, _proc, GetModuleHandle(null), 0);
+            if (_hook == IntPtr.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex;
+            ready.Set();
+            return;
+        }
+
+        ready.Set();
+
+        // Low-level hooks are delivered through this thread's message queue.
+        while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+        {
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+
+        UnhookWindowsHookEx(_hook);
+        _hook = IntPtr.Zero;
     }
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
@@ -89,9 +165,10 @@ public sealed class MouseWheelHook : IDisposable
                 try
                 {
                     var decision = _decide(delta);
-                    if (decision.ReplayDelta != 0)
+                    if (decision.ReplayDelta != 0 && !_replayQueue.IsAddingCompleted)
                     {
-                        Replay(decision.ReplayDelta);
+                        // Never SendInput from here; hand it to the replay thread.
+                        _replayQueue.TryAdd(decision.ReplayDelta);
                     }
 
                     if (!decision.Allow)
@@ -109,6 +186,23 @@ public sealed class MouseWheelHook : IDisposable
         return CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 
+    // ---------------------------------------------------------- replay thread
+
+    private void ReplayLoop()
+    {
+        try
+        {
+            foreach (var delta in _replayQueue.GetConsumingEnumerable())
+            {
+                Replay(delta);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Shutting down.
+        }
+    }
+
     private static void Replay(int delta)
     {
         var input = new Input
@@ -124,6 +218,8 @@ public sealed class MouseWheelHook : IDisposable
 
         SendInput(1, [input], Marshal.SizeOf<Input>());
     }
+
+    // ---------------------------------------------------------------- interop
 
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -164,6 +260,17 @@ public sealed class MouseWheelHook : IDisposable
         // so no explicit padding is required here.
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Msg
+    {
+        public IntPtr Hwnd;
+        public uint Message;
+        public IntPtr WParam;
+        public IntPtr LParam;
+        public uint Time;
+        public Point Pt;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
 
@@ -176,6 +283,23 @@ public sealed class MouseWheelHook : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out Msg lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TranslateMessage(ref Msg lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref Msg lpMsg);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostThreadMessage(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr GetModuleHandle(string? lpModuleName);

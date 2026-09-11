@@ -2,6 +2,14 @@
 
 All notable changes to Scroll Fix. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.1] - 2026-09-11
+
+### Fixed
+- **System-wide input stutter and unresponsive tray menu in v1.1.0.** The reversal replay called `SendInput` from inside the low-level hook callback. With real mouse input this deadlocks inside win32k: the raw input thread waits for the hook callback while the callback waits for the raw input thread. Every mouse event then hit the hook timeout (jerky cursor, stutter), the UI thread hung (tray menu would not open), any process calling `SendInput` hung, and the process could not be killed until reboot.
+  - The hook now runs on a dedicated high-priority thread with its own message loop, so UI work can never delay it.
+  - Replays are queued and sent from a separate worker thread, in order. The hook callback never calls `SendInput`.
+- If you ran v1.1.0: quit it, **reboot** (a stuck v1.1.0 thread survives until then), then start v1.1.1.
+
 ## [1.1.0] - 2026-09-11
 
 ### Added
