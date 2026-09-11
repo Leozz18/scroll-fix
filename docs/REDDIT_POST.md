@@ -42,6 +42,16 @@ Blocks reverse ghost pulses system-wide. Free/MIT.
 
 ---
 
+## v1.1 follow-up comment (reply on the original thread)
+
+Update based on the feedback here: v1.1.0 adds a **Balanced mode** that fixes the "can't quickly change direction" issue.
+
+Instead of blocking every opposite notch, it holds the first one and waits for the next. If you really reversed, that notch passes and the held one is replayed, so nothing is lost. If the wheel went back the other way, it was a ghost and gets dropped. Rapid up/down/up/down works again.
+
+Also new: presets (Quick reverse / Worn encoder), a 10-minute pause, a small 0.3 MB exe next to the standalone one, and CI-built releases with checksums.
+
+https://github.com/Leozz18/scroll-fix/releases/latest
+
 ## Tips
 
 - Lead with the symptom people search for

@@ -1,0 +1,71 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore ScrollFix.sln
+      - run: dotnet build ScrollFix.sln -c Release --no-restore
+      - run: dotnet test ScrollFix.sln -c Release --no-build --verbosity normal
+
+  publish:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish (framework-dependent, small)
+        run: >
+          dotnet publish src/ScrollFix -c Release -r win-x64
+          --self-contained false -p:PublishSingleFile=true
+          -o out/light
+
+      - name: Publish (self-contained, no .NET needed)
+        run: >
+          dotnet publish src/ScrollFix -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true
+          -o out/standalone
+
+      - name: Rename assets
+        shell: pwsh
+        run: |
+          Copy-Item out/light/ScrollFix.exe      out/ScrollFix.exe
+          Copy-Item out/standalone/ScrollFix.exe out/ScrollFix-standalone.exe
+          Get-FileHash out/ScrollFix.exe, out/ScrollFix-standalone.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content out/SHA256SUMS.txt
+          Get-Content out/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScrollFix
+          path: |
+            out/ScrollFix.exe
+            out/ScrollFix-standalone.exe
+            out/SHA256SUMS.txt
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/ScrollFix.exe
+            out/ScrollFix-standalone.exe
+            out/SHA256SUMS.txt

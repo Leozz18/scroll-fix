@@ -3,144 +3,234 @@ namespace ScrollFix;
 internal sealed class SettingsForm : Form
 {
     private readonly AppSettings _settings;
+
     private readonly CheckBox _enabled;
-    private readonly CheckBox _aggressive;
+    private readonly RadioButton _modeBalanced;
+    private readonly RadioButton _modeStrict;
     private readonly NumericUpDown _blockMs;
-    private readonly NumericUpDown _maxNotches;
     private readonly NumericUpDown _confirmCount;
+    private readonly Label _confirmLabel;
     private readonly CheckBox _autostart;
     private readonly Label _blockedLabel;
+    private readonly Label _modeHint;
+
+    /// <summary>Raised after settings were saved so the host can reload the filter.</summary>
+    public event EventHandler? SettingsApplied;
 
     public SettingsForm(AppSettings settings)
     {
         _settings = settings;
 
-        Text = "Scroll Fix";
         Text = "Scroll Fix — Settings";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
+        ShowInTaskbar = true;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(400, 340);
-        TopMost = true;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = new Font("Segoe UI", 9f);
+        Padding = new Padding(12);
 
-        _enabled = new CheckBox
+        var root = new TableLayoutPanel
         {
-            Text = "Filter enabled",
-            Checked = settings.Enabled,
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
             AutoSize = true,
-            Location = new Point(16, 16),
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
-        _aggressive = new CheckBox
+        // --- Presets -------------------------------------------------------
+        var presets = new GroupBox { Text = "Quick presets", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var presetRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
+        presetRow.Controls.Add(PresetButton("Balanced (default)", s => s.ApplyBalancedPreset()));
+        presetRow.Controls.Add(PresetButton("Quick reverse", s => s.ApplyQuickReversePreset()));
+        presetRow.Controls.Add(PresetButton("Worn encoder", s => s.ApplyWornEncoderPreset()));
+        presets.Controls.Add(presetRow);
+
+        // --- Filter --------------------------------------------------------
+        var filterBox = new GroupBox { Text = "Filter", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var grid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2 };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        _enabled = new CheckBox { Text = "Filter enabled", AutoSize = true, Checked = settings.Enabled };
+        grid.Controls.Add(_enabled, 0, 0);
+        grid.SetColumnSpan(_enabled, 2);
+
+        _modeBalanced = new RadioButton
         {
-            Text = "Aggressive mode (recommended for worn wheels)",
-            Checked = settings.AggressiveMode,
+            Text = "Balanced — holds one notch, confirms with the next, replays it if real",
             AutoSize = true,
-            Location = new Point(16, 44),
+            Checked = settings.Mode == FilterMode.Balanced,
         };
+        _modeStrict = new RadioButton
+        {
+            Text = "Strict — drops every opposite notch inside the window (pause to reverse)",
+            AutoSize = true,
+            Checked = settings.Mode == FilterMode.Strict,
+        };
+        _modeBalanced.CheckedChanged += (_, _) => UpdateModeUi();
+        grid.Controls.Add(_modeBalanced, 0, 1);
+        grid.SetColumnSpan(_modeBalanced, 2);
+        grid.Controls.Add(_modeStrict, 0, 2);
+        grid.SetColumnSpan(_modeStrict, 2);
 
-        var lblMs = new Label { Text = "Reverse block window (ms)", AutoSize = true, Location = new Point(16, 80) };
+        grid.Controls.Add(new Label { Text = "Reverse block window (ms)", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) }, 0, 3);
         _blockMs = new NumericUpDown
         {
             Minimum = 40,
             Maximum = 500,
+            Increment = 10,
             Value = Math.Clamp(settings.ReverseBlockMs, 40, 500),
-            Location = new Point(300, 76),
-            Width = 70,
+            Width = 72,
+            Margin = new Padding(3, 6, 3, 3),
         };
+        grid.Controls.Add(_blockMs, 1, 3);
 
-        var lblNotches = new Label { Text = "Max ghost notches (mild mode)", AutoSize = true, Location = new Point(16, 116) };
-        _maxNotches = new NumericUpDown
-        {
-            Minimum = 1,
-            Maximum = 6,
-            Value = settings.MaxGhostNotches,
-            Location = new Point(300, 112),
-            Width = 70,
-        };
-
-        var lblConfirm = new Label { Text = "Confirm direction count (mild)", AutoSize = true, Location = new Point(16, 152) };
+        _confirmLabel = new Label { Text = "Notches to confirm a reversal", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) };
+        grid.Controls.Add(_confirmLabel, 0, 4);
         _confirmCount = new NumericUpDown
         {
-            Minimum = 1,
+            Minimum = 2,
             Maximum = 5,
-            Value = settings.ConfirmDirectionCount,
-            Location = new Point(300, 148),
-            Width = 70,
+            Value = Math.Clamp(settings.ConfirmDirectionCount, 2, 5),
+            Width = 72,
+            Margin = new Padding(3, 6, 3, 3),
         };
+        grid.Controls.Add(_confirmCount, 1, 4);
 
-        _autostart = new CheckBox
-        {
-            Text = "Start with Windows",
-            Checked = settings.StartWithWindows,
-            AutoSize = true,
-            Location = new Point(16, 188),
-        };
+        _modeHint = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(440, 0), Margin = new Padding(3, 8, 3, 3) };
+        grid.Controls.Add(_modeHint, 0, 5);
+        grid.SetColumnSpan(_modeHint, 2);
 
-        _blockedLabel = new Label
-        {
-            Text = $"Ghost scrolls blocked: {settings.BlockedCount}",
-            AutoSize = true,
-            Location = new Point(16, 220),
-        };
+        filterBox.Controls.Add(grid);
 
-        var hint = new Label
-        {
-            Text = "Aggressive: opposite scrolls within the window are always blocked.\nTo reverse on purpose, pause briefly (~0.2s) then scroll.",
-            AutoSize = true,
-            ForeColor = Color.DimGray,
-            Location = new Point(16, 248),
-        };
+        // --- General -------------------------------------------------------
+        var generalBox = new GroupBox { Text = "General", Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8) };
+        var general = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2 };
+        general.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        general.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        var reset = new Button { Text = "Reset counter", Location = new Point(16, 296), Width = 110 };
-        var save = new Button { Text = "Save", Location = new Point(200, 296), Width = 80 };
-        var close = new Button { Text = "Close", DialogResult = DialogResult.Cancel, Location = new Point(290, 296), Width = 80 };
+        _autostart = new CheckBox { Text = "Start with Windows", AutoSize = true, Checked = settings.StartWithWindows };
+        general.Controls.Add(_autostart, 0, 0);
+        general.SetColumnSpan(_autostart, 2);
 
-        save.Click += (_, _) =>
-        {
-            Apply();
-            MessageBox.Show(this, "Settings saved.", "Scroll Fix", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        };
+        _blockedLabel = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) };
+        general.Controls.Add(_blockedLabel, 0, 1);
+        var reset = new Button { Text = "Reset counter", AutoSize = true, Margin = new Padding(3, 4, 3, 3) };
         reset.Click += (_, _) =>
         {
             _settings.BlockedCount = 0;
             _settings.Save();
-            _blockedLabel.Text = "Ghost scrolls blocked: 0";
+            RefreshBlocked();
         };
+        general.Controls.Add(reset, 1, 1);
+        generalBox.Controls.Add(general);
 
+        // --- Buttons -------------------------------------------------------
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            FlowDirection = FlowDirection.RightToLeft,
+            Margin = new Padding(0, 8, 0, 0),
+        };
+        var close = new Button { Text = "Close", AutoSize = true, DialogResult = DialogResult.Cancel };
+        var save = new Button { Text = "Save", AutoSize = true };
+        var github = new Button { Text = "GitHub", AutoSize = true };
+        github.Click += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(TrayAppContext.RepoUrl) { UseShellExecute = true });
+            }
+            catch
+            {
+                // ignore
+            }
+        };
+        save.Click += (_, _) =>
+        {
+            Apply();
+            save.Text = "Saved ✓";
+            var t = new System.Windows.Forms.Timer { Interval = 1200 };
+            t.Tick += (_, _) => { save.Text = "Save"; t.Stop(); t.Dispose(); };
+            t.Start();
+        };
+        buttons.Controls.Add(close);
+        buttons.Controls.Add(save);
+        buttons.Controls.Add(github);
+
+        root.Controls.Add(presets);
+        root.Controls.Add(filterBox);
+        root.Controls.Add(generalBox);
+        root.Controls.Add(buttons);
+        Controls.Add(root);
+
+        AcceptButton = save;
         CancelButton = close;
+        AutoSize = true;
+        AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        MinimumSize = new Size(480, 0);
 
-        Controls.AddRange(
-        [
-            _enabled,
-            _aggressive,
-            lblMs,
-            _blockMs,
-            lblNotches,
-            _maxNotches,
-            lblConfirm,
-            _confirmCount,
-            _autostart,
-            _blockedLabel,
-            hint,
-            reset,
-            save,
-            close,
-        ]);
+        UpdateModeUi();
+        RefreshBlocked();
+    }
+
+    private Button PresetButton(string text, Action<AppSettings> apply)
+    {
+        var b = new Button { Text = text, AutoSize = true, Margin = new Padding(0, 0, 8, 0) };
+        b.Click += (_, _) =>
+        {
+            // Apply to a scratch copy so the UI reflects the preset before saving.
+            var scratch = new AppSettings();
+            apply(scratch);
+            _modeBalanced.Checked = scratch.Mode == FilterMode.Balanced;
+            _modeStrict.Checked = scratch.Mode == FilterMode.Strict;
+            _blockMs.Value = scratch.ReverseBlockMs;
+            _confirmCount.Value = scratch.ConfirmDirectionCount;
+            _enabled.Checked = true;
+            Apply();
+        };
+        return b;
+    }
+
+    private void UpdateModeUi()
+    {
+        var balanced = _modeBalanced.Checked;
+        _confirmCount.Enabled = balanced;
+        _confirmLabel.Enabled = balanced;
+        _modeHint.Text = balanced
+            ? "Balanced keeps fast up/down/up scrolling responsive: a real reversal costs one notch of latency and nothing is lost. Single-notch reversals inside the window are treated as ghosts."
+            : "Strict blocks every opposite notch inside the window and extends it while ghosts keep firing. To reverse on purpose, stop scrolling for about the window length first.";
+    }
+
+    private void RefreshBlocked()
+    {
+        _blockedLabel.Text = $"Ghost scrolls blocked: {_settings.BlockedCount}";
     }
 
     private void Apply()
     {
         _settings.Enabled = _enabled.Checked;
-        _settings.AggressiveMode = _aggressive.Checked;
+        _settings.Mode = _modeStrict.Checked ? FilterMode.Strict : FilterMode.Balanced;
         _settings.ReverseBlockMs = (int)_blockMs.Value;
-        _settings.MaxGhostNotches = (int)_maxNotches.Value;
         _settings.ConfirmDirectionCount = (int)_confirmCount.Value;
         _settings.StartWithWindows = _autostart.Checked;
         _settings.Clamp();
         _settings.Save();
-        Autostart.SetEnabled(_settings.StartWithWindows);
-        _blockedLabel.Text = $"Ghost scrolls blocked: {_settings.BlockedCount}";
+
+        try
+        {
+            Autostart.SetEnabled(_settings.StartWithWindows);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Could not update autostart:\n{ex.Message}", "Scroll Fix", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        RefreshBlocked();
+        SettingsApplied?.Invoke(this, EventArgs.Empty);
     }
 }

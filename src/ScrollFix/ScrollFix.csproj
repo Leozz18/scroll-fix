@@ -7,12 +7,26 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>ScrollFix</AssemblyName>
     <RootNamespace>ScrollFix</RootNamespace>
-    <Version>1.0.0</Version>
-    <Authors>DEDSEC</Authors>
+    <Version>1.1.0</Version>
+    <Authors>Leozz18</Authors>
+    <Company>Leozz18</Company>
+    <Copyright>MIT License</Copyright>
     <Description>Filters reverse ghost scrolls from worn mouse wheel encoders</Description>
     <Product>Scroll Fix</Product>
+    <PackageProjectUrl>https://github.com/Leozz18/scroll-fix</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Leozz18/scroll-fix</RepositoryUrl>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <!-- Compression is only supported for self-contained single-file bundles. -->
+  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
 </Project>

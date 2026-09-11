@@ -22,7 +22,7 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
-publish/
+publish*/
 
 # .NET
 project.lock.json
