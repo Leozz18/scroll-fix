@@ -39,6 +39,10 @@ flowchart LR
 
 Scroll Fix installs a low-level mouse hook (`WH_MOUSE_LL`) and looks at the direction and timing of each wheel notch.
 
+### Rule 0: impossible reversals are bursts
+
+A hand cannot reverse a detented wheel in under ~40 ms, but a worn encoder happily fires 2–4 opposite pulses within the same millisecond. Any opposite notch closer than the *minimum reversal gap* (40 ms) to the previous wheel event is dropped on the spot, in both modes. This single rule removed 90 % of the wrong-way notches on a real trace of a badly worn wheel.
+
 ### Balanced mode (default)
 
 The first notch that goes against the current direction inside the *block window* (220 ms) is **held**, not delivered.
@@ -50,17 +54,23 @@ This is what makes rapid up/down/up/down scrolling feel normal while ghosts stil
 
 ### Strict mode
 
-Every opposite notch inside the window is dropped and the window is extended while ghosts keep firing. Choose this if your encoder fires **bursts** of two or more ghost pulses. Reversing on purpose then requires a short pause (about the window length).
+Every opposite notch inside the window is dropped and the window is extended while ghosts keep firing. Choose this if ghosts still leak through in Balanced mode: on a heavily worn wheel it brought wrong-way notches from 9 to **0** per 6 minutes of scrolling. Reversing on purpose then requires a short pause (about the window length). If Scroll Fix blocks 30+ ghosts in ten minutes while in Balanced mode, it suggests this preset once from the tray.
 
 ### Presets
 
-| Preset | Mode | Window | Use when |
-|--------|------|--------|----------|
-| Balanced (default) | Balanced | 220 ms | Most worn wheels |
-| Quick reverse | Balanced | 160 ms | Gaming, timeline scrubbing, rapid up/down |
-| Worn encoder | Strict | 260 ms | Ghosts still leak through, or they come in bursts |
+| Preset | Mode | Window | Min. reversal gap | Use when |
+|--------|------|--------|-------------------|----------|
+| Balanced (default) | Balanced | 220 ms | 40 ms | Most worn wheels |
+| Quick reverse | Balanced | 160 ms | 30 ms | Gaming, timeline scrubbing, rapid up/down |
+| Worn encoder | Strict | 260 ms | 50 ms | Ghosts still leak through, or they come in bursts |
+
+Optional: *Drop same-direction duplicates* removes a second same-direction pulse arriving within a few ms of the previous one (encoders that fire twice per detent make scrolling feel uneven). Off by default.
 
 Settings live in `%LOCALAPPDATA%\ScrollFix\settings.json`.
+
+### Diagnostics
+
+Tray → **Diagnostics → Log wheel events** writes every notch (time, delta, decision) to `%LOCALAPPDATA%\ScrollFix\wheel-trace.log`. Attach it to a bug report; it is what the thresholds above were tuned on.
 
 ## FAQ
 

@@ -22,6 +22,7 @@ public sealed class AppSettings
 
     public const int DefaultBlockMs = 220;
     public const int DefaultConfirmCount = 2;
+    public const int DefaultMinReverseGapMs = 40;
 
     public bool Enabled { get; set; } = true;
 
@@ -33,12 +34,27 @@ public sealed class AppSettings
     /// <summary>Balanced mode: opposite notches needed to confirm a real reversal (min 2).</summary>
     public int ConfirmDirectionCount { get; set; } = DefaultConfirmCount;
 
+    /// <summary>
+    /// An opposite notch closer than this to the previous wheel event is always a ghost
+    /// (encoder burst). A hand cannot reverse a detented wheel faster than ~40 ms. 0 = off.
+    /// </summary>
+    public int MinReverseGapMs { get; set; } = DefaultMinReverseGapMs;
+
+    /// <summary>
+    /// Same-direction notches closer than this to the previous event are dropped as
+    /// duplicate pulses (encoders that fire twice per detent). 0 = off (default).
+    /// </summary>
+    public int MinSameDirGapMs { get; set; }
+
     public bool StartWithWindows { get; set; }
 
     public int BlockedCount { get; set; }
 
     /// <summary>Diagnostics: log every wheel event to wheel-trace.log.</summary>
     public bool TraceEnabled { get; set; }
+
+    /// <summary>Set once the tray has suggested the Worn encoder preset, so it never nags.</summary>
+    public bool StrictSuggested { get; set; }
 
     /// <summary>Legacy v1.0 flag, read only to detect old settings files; never written back.</summary>
     [JsonPropertyName("AggressiveMode")]
@@ -56,6 +72,8 @@ public sealed class AppSettings
     {
         ReverseBlockMs = Math.Clamp(ReverseBlockMs, 40, 500);
         ConfirmDirectionCount = Math.Clamp(ConfirmDirectionCount, 2, 5);
+        MinReverseGapMs = Math.Clamp(MinReverseGapMs, 0, 100);
+        MinSameDirGapMs = Math.Clamp(MinSameDirGapMs, 0, 30);
         BlockedCount = Math.Max(0, BlockedCount);
     }
 
@@ -65,6 +83,7 @@ public sealed class AppSettings
         Mode = FilterMode.Strict;
         ReverseBlockMs = 260;
         ConfirmDirectionCount = DefaultConfirmCount;
+        MinReverseGapMs = 50;
     }
 
     /// <summary>Preset for people who scroll up/down rapidly (gaming, timelines).</summary>
@@ -73,6 +92,7 @@ public sealed class AppSettings
         Mode = FilterMode.Balanced;
         ReverseBlockMs = 160;
         ConfirmDirectionCount = DefaultConfirmCount;
+        MinReverseGapMs = 30;
     }
 
     /// <summary>Default preset.</summary>
@@ -81,6 +101,7 @@ public sealed class AppSettings
         Mode = FilterMode.Balanced;
         ReverseBlockMs = DefaultBlockMs;
         ConfirmDirectionCount = DefaultConfirmCount;
+        MinReverseGapMs = DefaultMinReverseGapMs;
     }
 
     public static AppSettings Load()

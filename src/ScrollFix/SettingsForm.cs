@@ -9,6 +9,8 @@ internal sealed class SettingsForm : Form
     private readonly RadioButton _modeStrict;
     private readonly NumericUpDown _blockMs;
     private readonly NumericUpDown _confirmCount;
+    private readonly NumericUpDown _minReverseGap;
+    private readonly NumericUpDown _minSameDirGap;
     private readonly Label _confirmLabel;
     private readonly CheckBox _autostart;
     private readonly Label _blockedLabel;
@@ -100,8 +102,31 @@ internal sealed class SettingsForm : Form
         };
         grid.Controls.Add(_confirmCount, 1, 4);
 
-        _modeHint = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(440, 0), Margin = new Padding(3, 8, 3, 3) };
-        grid.Controls.Add(_modeHint, 0, 5);
+        grid.Controls.Add(new Label { Text = "Min. reversal gap (ms) — opposite notch closer than this = burst", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) }, 0, 5);
+        _minReverseGap = new NumericUpDown
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Increment = 5,
+            Value = Math.Clamp(settings.MinReverseGapMs, 0, 100),
+            Width = 72,
+            Margin = new Padding(3, 6, 3, 3),
+        };
+        grid.Controls.Add(_minReverseGap, 1, 5);
+
+        grid.Controls.Add(new Label { Text = "Drop same-direction duplicates closer than (ms, 0 = off)", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) }, 0, 6);
+        _minSameDirGap = new NumericUpDown
+        {
+            Minimum = 0,
+            Maximum = 30,
+            Value = Math.Clamp(settings.MinSameDirGapMs, 0, 30),
+            Width = 72,
+            Margin = new Padding(3, 6, 3, 3),
+        };
+        grid.Controls.Add(_minSameDirGap, 1, 6);
+
+        _modeHint = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, MaximumSize = new Size(480, 0), Margin = new Padding(3, 8, 3, 3) };
+        grid.Controls.Add(_modeHint, 0, 7);
         grid.SetColumnSpan(_modeHint, 2);
 
         filterBox.Controls.Add(grid);
@@ -172,7 +197,7 @@ internal sealed class SettingsForm : Form
         CancelButton = close;
         AutoSize = true;
         AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        MinimumSize = new Size(480, 0);
+        MinimumSize = new Size(520, 0);
 
         UpdateModeUi();
         RefreshBlocked();
@@ -190,6 +215,7 @@ internal sealed class SettingsForm : Form
             _modeStrict.Checked = scratch.Mode == FilterMode.Strict;
             _blockMs.Value = scratch.ReverseBlockMs;
             _confirmCount.Value = scratch.ConfirmDirectionCount;
+            _minReverseGap.Value = scratch.MinReverseGapMs;
             _enabled.Checked = true;
             Apply();
         };
@@ -217,6 +243,8 @@ internal sealed class SettingsForm : Form
         _settings.Mode = _modeStrict.Checked ? FilterMode.Strict : FilterMode.Balanced;
         _settings.ReverseBlockMs = (int)_blockMs.Value;
         _settings.ConfirmDirectionCount = (int)_confirmCount.Value;
+        _settings.MinReverseGapMs = (int)_minReverseGap.Value;
+        _settings.MinSameDirGapMs = (int)_minSameDirGap.Value;
         _settings.StartWithWindows = _autostart.Checked;
         _settings.Clamp();
         _settings.Save();

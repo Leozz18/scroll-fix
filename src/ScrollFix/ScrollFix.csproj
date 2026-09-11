@@ -10,7 +10,7 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>ScrollFix</AssemblyName>
     <RootNamespace>ScrollFix</RootNamespace>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
     <Authors>Leozz18</Authors>
     <Company>Leozz18</Company>
     <Copyright>MIT License</Copyright>

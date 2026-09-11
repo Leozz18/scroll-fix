@@ -14,15 +14,20 @@ public readonly record struct FilterDecision(bool Allow, bool Blocked = false, i
 /// <summary>
 /// Suppresses reverse scrolls that look like worn-encoder ghosts.
 ///
-/// Balanced mode (default): the first opposite notch inside the block window is
-/// held back. If the next notch goes the same (new) way, the reversal is real:
-/// the current notch passes and the held notches are replayed, so nothing is
-/// lost. If the next notch goes back to the original direction, the held notch
-/// was a ghost and is dropped for good.
+/// Rule 0 (both modes): an opposite notch arriving less than MinReverseGapMs
+/// after the previous wheel event (any direction, accepted or not) is a ghost.
+/// A hand cannot reverse a detented wheel in under ~40 ms; worn encoders emit
+/// bursts of 2-4 opposite pulses within 0-16 ms. This kills bursts outright and
+/// stops a second burst pulse from "confirming" the first.
+///
+/// Balanced mode (default): an opposite notch inside the block window that
+/// passes rule 0 is held. If the next notch goes the same (new) way, the
+/// reversal is real: the current notch passes and the held notches are
+/// replayed, so nothing is lost. If the next notch goes back to the original
+/// direction, the held notch was a ghost and is dropped for good.
 ///
 /// Strict mode: every opposite notch inside the window is dropped and the
-/// window is extended. Best for encoders that fire ghost bursts of 2+ pulses.
-/// Reversing on purpose requires a short pause.
+/// window is extended. Reversing on purpose requires a short pause.
 /// </summary>
 public sealed class ScrollFilter
 {
@@ -36,6 +41,9 @@ public sealed class ScrollFilter
     private int _lastDir;
     private long _lastTimeMs;
 
+    // Time of the last wheel event of any kind (accepted, held or dropped).
+    private long _lastEventMs;
+
     // Held (unconfirmed) reversal state — Balanced mode only.
     private int _pendingDir;
     private int _pendingCount;
@@ -43,7 +51,7 @@ public sealed class ScrollFilter
     private long _pendingLastMs;
 
     public ScrollFilter(AppSettings settings)
-        : this(settings, static () => Environment.TickCount64)
+        : this(settings, HighResClock.NowMs)
     {
     }
 
@@ -67,6 +75,7 @@ public sealed class ScrollFilter
         {
             _lastDir = 0;
             _lastTimeMs = 0;
+            _lastEventMs = 0;
             ClearPending();
         }
     }
@@ -83,10 +92,22 @@ public sealed class ScrollFilter
             var direction = delta > 0 ? 1 : -1;
             var now = _clock();
             var elapsed = now - _lastTimeMs;
+            var sinceAnyEvent = _lastEventMs == 0 ? long.MaxValue : now - _lastEventMs;
+            _lastEventMs = now;
 
-            // Same direction as established (or first event): always allow.
+            // Same direction as established (or first event): allow, unless it is a
+            // duplicate pulse riding on the previous one (optional rule).
             if (direction == _lastDir || _lastDir == 0)
             {
+                if (_settings.MinSameDirGapMs > 0
+                    && _pendingCount == 0
+                    && direction == _lastDir
+                    && sinceAnyEvent < _settings.MinSameDirGapMs)
+                {
+                    _settings.BlockedCount++;
+                    return new FilterDecision(Allow: false, Blocked: true);
+                }
+
                 if (_pendingCount > 0)
                 {
                     // Wheel went back to the original direction: held notches were ghosts.
@@ -96,6 +117,18 @@ public sealed class ScrollFilter
 
                 Accept(direction, now);
                 return new FilterDecision(Allow: true);
+            }
+
+            // Rule 0: physically impossible reversal speed => encoder burst.
+            if (sinceAnyEvent < _settings.MinReverseGapMs)
+            {
+                _settings.BlockedCount++;
+                if (_settings.Mode == FilterMode.Strict)
+                {
+                    _lastTimeMs = now;
+                }
+
+                return new FilterDecision(Allow: false, Blocked: true);
             }
 
             // Balanced: a held reversal is waiting for confirmation.

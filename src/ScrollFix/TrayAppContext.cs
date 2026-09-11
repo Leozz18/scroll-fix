@@ -31,6 +31,12 @@ internal sealed class TrayAppContext : ApplicationContext
     private DateTime _pausedUntil = DateTime.MinValue;
     private bool _enabledBeforePause;
 
+    // Ghost-rate window used to suggest the Strict preset to burst-prone wheels.
+    private const int SuggestStrictThreshold = 30;
+    private static readonly TimeSpan SuggestStrictWindow = TimeSpan.FromMinutes(10);
+    private DateTime _rateWindowStart = DateTime.UtcNow;
+    private int _blockedAtWindowStart;
+
     public TrayAppContext()
     {
         _settings = AppSettings.Load();
@@ -76,6 +82,8 @@ internal sealed class TrayAppContext : ApplicationContext
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += OnOpenSettings;
+        _tray.BalloonTipClicked += OnOpenSettings;
+        _blockedAtWindowStart = _settings.BlockedCount;
 
         _uiTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _uiTimer.Tick += OnUiTick;
@@ -108,10 +116,41 @@ internal sealed class TrayAppContext : ApplicationContext
         var decision = _filter.Decide(delta);
         if (_settings.TraceEnabled)
         {
-            _trace.Record(Environment.TickCount64, delta, decision, _settings.BlockedCount);
+            _trace.Record(HighResClock.NowMs(), delta, decision, _settings.BlockedCount);
         }
 
         return decision;
+    }
+
+    /// <summary>
+    /// Wheels that fire ghost bursts are served far better by Strict mode
+    /// (0 vs ~9 wrong-way notches per 6 min on a real trace). Tell the user once.
+    /// </summary>
+    private void MaybeSuggestStrict(int blocked)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _rateWindowStart > SuggestStrictWindow)
+        {
+            _rateWindowStart = now;
+            _blockedAtWindowStart = blocked;
+            return;
+        }
+
+        if (_settings.StrictSuggested || _settings.Mode != FilterMode.Balanced || !_settings.Enabled)
+        {
+            return;
+        }
+
+        if (blocked - _blockedAtWindowStart >= SuggestStrictThreshold)
+        {
+            _settings.StrictSuggested = true;
+            TrySave();
+            _tray.ShowBalloonTip(
+                15000,
+                "Scroll Fix: your wheel fires ghost bursts",
+                $"{SuggestStrictThreshold}+ ghosts blocked in a few minutes. The \"Worn encoder\" preset (Strict mode) handles this best. Click here to open Settings.",
+                ToolTipIcon.Info);
+        }
     }
 
     private void OnToggleTrace(object? sender, EventArgs e)
@@ -132,6 +171,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _trace.Flush();
 
         var blocked = _settings.BlockedCount;
+        MaybeSuggestStrict(blocked);
         if (blocked != _lastShownBlocked)
         {
             _lastShownBlocked = blocked;

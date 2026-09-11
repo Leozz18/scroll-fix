@@ -2,6 +2,21 @@
 
 All notable changes to Scroll Fix. Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] - 2026-09-11
+
+Tuned on a real 6-minute trace of a heavily worn Cooler Master wheel (653 notches). v1.1.1 Balanced let **90** wrong-way notches through on that trace; v1.2.0 Balanced lets 9 through, v1.2.0 Strict 0.
+
+### Added
+- **Minimum reversal gap** (default 40 ms, both modes): an opposite notch closer than this to the previous wheel event is physically impossible for a hand and is dropped immediately. Worn encoders fire bursts of 2–4 opposite pulses within 0–16 ms; in v1.1.x the second burst pulse "confirmed" the first as a real reversal.
+- Optional **same-direction duplicate** rule (off by default) for encoders that fire twice per detent.
+- **Diagnostics**: tray → Diagnostics → *Log wheel events* writes `wheel-trace.log`; *Open settings folder*.
+- One-time tray suggestion to switch to the *Worn encoder* preset when 30+ ghosts are blocked within 10 minutes in Balanced mode.
+- High-resolution clock (QueryPerformanceCounter) for the filter and the trace. `Environment.TickCount` has 15.6 ms granularity, too coarse to separate bursts from human notches.
+
+### Changed
+- Presets now set the reversal gap: Balanced 40 ms, Quick reverse 30 ms, Worn encoder 50 ms.
+- Settings window: two new fields, wider layout.
+
 ## [1.1.1] - 2026-09-11
 
 ### Fixed

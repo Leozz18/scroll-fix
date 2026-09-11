@@ -22,7 +22,9 @@ public class ScrollFilterTests
         FilterMode mode,
         int blockMs = 220,
         int confirm = 2,
-        bool enabled = true)
+        bool enabled = true,
+        int minReverseGap = 40,
+        int minSameDirGap = 0)
     {
         var settings = new AppSettings
         {
@@ -30,6 +32,8 @@ public class ScrollFilterTests
             Mode = mode,
             ReverseBlockMs = blockMs,
             ConfirmDirectionCount = confirm,
+            MinReverseGapMs = minReverseGap,
+            MinSameDirGapMs = minSameDirGap,
         };
         var clock = new FakeClock();
         return (new ScrollFilter(settings, clock.Read), clock, settings);
@@ -81,21 +85,120 @@ public class ScrollFilterTests
     // -------------------------------------------------------------- balanced
 
     [Fact]
-    public void Balanced_SingleGhostMidScroll_IsDroppedAndCounted()
+    public void Balanced_SlowGhostMidScroll_IsHeldThenDropped()
     {
         var (f, c, s) = Create(FilterMode.Balanced);
         Assert.True(Tick(f, c, Down, 0).Allow);
-        Assert.True(Tick(f, c, Down, 40).Allow);
+        Assert.True(Tick(f, c, Down, 50).Allow);
 
-        var ghost = Tick(f, c, Up, 30);
+        var ghost = Tick(f, c, Up, 60); // slow enough to be plausible: held
         Assert.False(ghost.Allow);
         Assert.True(ghost.Blocked);
         Assert.Equal(0, s.BlockedCount); // undecided until the next notch
 
-        var resume = Tick(f, c, Down, 30);
+        var resume = Tick(f, c, Down, 50);
         Assert.True(resume.Allow);
         Assert.Equal(0, resume.ReplayDelta);
         Assert.Equal(1, s.BlockedCount);
+    }
+
+    // ---- burst rule (MinReverseGapMs), modelled on a real wheel-trace.log ----
+
+    [Theory]
+    [InlineData(FilterMode.Balanced)]
+    [InlineData(FilterMode.Strict)]
+    public void Burst_FourOppositePulsesInSameInstant_AllDropped(FilterMode mode)
+    {
+        // Real trace: "-120 pass, +120, +120, +120, +120" all within the same ms.
+        var (f, c, s) = Create(mode);
+        Assert.True(Tick(f, c, Down, 1000).Allow);
+
+        for (var i = 0; i < 4; i++)
+        {
+            var d = Tick(f, c, Up, 0);
+            Assert.False(d.Allow);
+            Assert.Equal(0, d.ReplayDelta);
+        }
+
+        Assert.Equal(4, s.BlockedCount);
+        Assert.True(Tick(f, c, Down, 60).Allow); // scrolling down continues untouched
+    }
+
+    [Fact]
+    public void Burst_SecondPulseCannotConfirmHeldNotch()
+    {
+        // Held opposite notch at a plausible gap, then a burst pulse 5 ms later:
+        // the burst must not count as a confirmation.
+        var (f, c, s) = Create(FilterMode.Balanced);
+        Assert.True(Tick(f, c, Down, 0).Allow);
+        Assert.True(Tick(f, c, Down, 50).Allow);
+
+        Assert.False(Tick(f, c, Up, 60).Allow);   // held
+        var burst = Tick(f, c, Up, 5);            // physically impossible => ghost
+        Assert.False(burst.Allow);
+        Assert.Equal(0, burst.ReplayDelta);
+
+        var resume = Tick(f, c, Down, 50);        // wheel keeps going down
+        Assert.True(resume.Allow);
+        Assert.Equal(2, s.BlockedCount);          // burst pulse + the held ghost
+    }
+
+    [Fact]
+    public void Burst_AfterPause_FollowingBurstPulsesDropped()
+    {
+        // Real trace: 1 s pause, one down, then 4 ups in the same ms.
+        var (f, c, s) = Create(FilterMode.Balanced);
+        Assert.True(Tick(f, c, Down, 0).Allow);
+        Assert.True(Tick(f, c, Down, 1094).Allow);
+        Assert.False(Tick(f, c, Up, 0).Allow);
+        Assert.False(Tick(f, c, Up, 0).Allow);
+        Assert.False(Tick(f, c, Up, 0).Allow);
+        Assert.False(Tick(f, c, Up, 0).Allow);
+        Assert.Equal(4, s.BlockedCount);
+    }
+
+    [Fact]
+    public void Burst_RuleOff_FallsBackToHoldConfirm()
+    {
+        var (f, c, _) = Create(FilterMode.Balanced, minReverseGap: 0);
+        Assert.True(Tick(f, c, Down, 0).Allow);
+        Assert.False(Tick(f, c, Up, 5).Allow);          // held (no burst rule)
+        var confirm = Tick(f, c, Up, 5);
+        Assert.True(confirm.Allow);
+        Assert.Equal(Up, confirm.ReplayDelta);
+    }
+
+    [Fact]
+    public void HumanReversal_AtNormalCadence_StillConfirmsAndReplays()
+    {
+        // 47 ms is the median same-direction cadence seen in the real trace.
+        var (f, c, s) = Create(FilterMode.Balanced);
+        Assert.True(Tick(f, c, Down, 0).Allow);
+        Assert.True(Tick(f, c, Down, 47).Allow);
+        Assert.False(Tick(f, c, Up, 47).Allow);
+        var confirm = Tick(f, c, Up, 47);
+        Assert.True(confirm.Allow);
+        Assert.Equal(Up, confirm.ReplayDelta);
+        Assert.Equal(0, s.BlockedCount);
+    }
+
+    // ---- optional same-direction duplicate rule ----
+
+    [Fact]
+    public void SameDirDuplicate_DroppedWhenRuleOn_PassedWhenOff()
+    {
+        var (on, c1, s1) = Create(FilterMode.Balanced, minSameDirGap: 8);
+        Assert.True(Tick(on, c1, Down, 0).Allow);
+        Assert.True(Tick(on, c1, Down, 50).Allow);
+        Assert.False(Tick(on, c1, Down, 2).Allow);   // duplicate pulse
+        Assert.True(Tick(on, c1, Down, 50).Allow);
+        Assert.Equal(1, s1.BlockedCount);
+
+        var (off, c2, s2) = Create(FilterMode.Balanced, minSameDirGap: 0);
+        Assert.True(Tick(off, c2, Down, 0).Allow);
+        Assert.True(Tick(off, c2, Down, 50).Allow);
+        Assert.True(Tick(off, c2, Down, 2).Allow);
+        Assert.Equal(0, s2.BlockedCount);
     }
 
     [Fact]
@@ -155,9 +258,9 @@ public class ScrollFilterTests
         var (f, c, _) = Create(FilterMode.Balanced, confirm: 3);
         Assert.True(Tick(f, c, Down, 0).Allow);
 
-        Assert.False(Tick(f, c, Up, 40).Allow);
-        Assert.False(Tick(f, c, Up, 40).Allow);
-        var confirm = Tick(f, c, Up, 40);
+        Assert.False(Tick(f, c, Up, 50).Allow);
+        Assert.False(Tick(f, c, Up, 50).Allow);
+        var confirm = Tick(f, c, Up, 50);
         Assert.True(confirm.Allow);
         Assert.Equal(2 * Up, confirm.ReplayDelta);
     }
@@ -167,7 +270,7 @@ public class ScrollFilterTests
     {
         var (f, c, s) = Create(FilterMode.Balanced, blockMs: 220);
         Assert.True(Tick(f, c, Down, 0).Allow);
-        Assert.False(Tick(f, c, Up, 40).Allow);
+        Assert.False(Tick(f, c, Up, 50).Allow);
 
         // Long silence, then reverse again: the old held notch was a ghost,
         // the new one is an intentional reversal after a pause.
@@ -183,8 +286,8 @@ public class ScrollFilterTests
         var (f, c, _) = Create(FilterMode.Balanced);
         Assert.True(Tick(f, c, Down, 0).Allow);
 
-        Assert.False(Tick(f, c, 2 * Up, 40).Allow);   // fast wheel: two notches in one event
-        var confirm = Tick(f, c, Up, 40);
+        Assert.False(Tick(f, c, 2 * Up, 50).Allow);   // fast wheel: two notches in one event
+        var confirm = Tick(f, c, Up, 50);
         Assert.True(confirm.Allow);
         Assert.Equal(2 * Up, confirm.ReplayDelta);
     }
@@ -224,8 +327,8 @@ public class ScrollFilterTests
     {
         var (f, c, _) = Create(FilterMode.Strict);
         Assert.True(Tick(f, c, Down, 0).Allow);
-        Assert.False(Tick(f, c, Up, 40).Allow);
-        var second = Tick(f, c, Up, 40);
+        Assert.False(Tick(f, c, Up, 50).Allow);
+        var second = Tick(f, c, Up, 50);
         Assert.False(second.Allow);
         Assert.Equal(0, second.ReplayDelta);
     }
